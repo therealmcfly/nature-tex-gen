@@ -1,0 +1,16 @@
+# Generated reading copies
+output/
+main_nature_style.tex
+review_copy.tex
+
+# LaTeX build output
+*.aux
+*.bbl
+*.blg
+*.fdb_latexmk
+*.fls
+*.log
+*.out
+*.synctex.gz
+*.toc
+*.pdf
