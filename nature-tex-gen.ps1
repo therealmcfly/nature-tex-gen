@@ -58,6 +58,74 @@ function Get-LatexArgument([string]$Text, [string]$Command) {
     }
     throw "Unbalanced argument in LaTeX command: $Command"
 }
+function Get-SourcePreamble([string]$Text, [string]$Template) {
+    $documentStart = [regex]::Match($Text, '\\begin\s*\{document\}')
+    if (-not $documentStart.Success) { throw 'main.tex must contain \begin{document}.' }
+    $extra = $Text.Substring(0, $documentStart.Index)
+
+    # Remove only document metadata, using balanced braces for nested author/title macros.
+    $metadata = [regex]::Matches($extra, '\\(?:documentclass|title|author|date)\b(?:\s*\[[^\]]*\])?\s*\{')
+    for ($m = $metadata.Count - 1; $m -ge 0; $m--) {
+        $start = $metadata[$m]
+        $depth = 1
+        $end = $start.Index + $start.Length
+        while ($end -lt $extra.Length -and $depth -gt 0) {
+            $slashes = 0
+            for ($j = $end - 1; $j -ge 0 -and $extra[$j] -eq '\'; $j--) { $slashes++ }
+            if ($slashes % 2 -eq 0) {
+                if ($extra[$end] -eq '{') { $depth++ }
+                elseif ($extra[$end] -eq '}') { $depth-- }
+            }
+            $end++
+        }
+        if ($depth -ne 0) { throw 'Unbalanced braces in source preamble metadata.' }
+        $extra = $extra.Remove($start.Index, $end - $start.Index)
+    }
+
+    # Layout/font/citation packages are owned by the reading-copy template.
+    $managed = @('fontenc', 'inputenc', 'geometry', 'newtxtext', 'newtxmath',
+        'newpxtext', 'newpxmath', 'helvet', 'times', 'mathptmx', 'mathpazo',
+        'palatino', 'lmodern', 'fontspec', 'unicode-math', 'natbib', 'titlesec',
+        'caption', 'fancyhdr', 'stfloats', 'microtype')
+    $packagePattern = '\\(?:usepackage|RequirePackage)\s*(?:\[(?<options>[^\]]*)\]\s*)?\{(?<names>[^{}]+)\}(?:\s*\[(?<version>[^\]]*)\])?'
+    $loaded = @{}
+    foreach ($match in [regex]::Matches($Template, $packagePattern)) {
+        foreach ($name in $match.Groups['names'].Value.Split(',')) { $loaded[$name.Trim()] = $true }
+    }
+    $packages = [System.Collections.Generic.List[string]]::new()
+    $options = [System.Collections.Generic.List[string]]::new()
+    $matches = [regex]::Matches($extra, $packagePattern)
+    # Process packages in source order, including comma-separated declarations.
+    foreach ($match in $matches) {
+        foreach ($item in $match.Groups['names'].Value.Split(',')) {
+            $name = $item.Trim()
+            if ($name -eq 'biblatex') { throw 'biblatex is incompatible with the generated natbib preamble.' }
+            if ($name -in $managed) {
+                if (-not $loaded.ContainsKey($name) -or $match.Groups['options'].Success) {
+                    Write-Warning "Source package '$name' uses the reading-copy template's font/layout/citation settings instead."
+                }
+                continue
+            }
+            if ($match.Groups['options'].Success) {
+                $options.Add('\PassOptionsToPackage{' + $match.Groups['options'].Value + '}{' + $name + '}')
+            }
+            if (-not $loaded.ContainsKey($name)) {
+                $version = ''
+                if ($match.Groups['version'].Success) { $version = '[' + $match.Groups['version'].Value + ']' }
+                $packages.Add('\usepackage{' + $name + '}' + $version)
+                $loaded[$name] = $true
+            }
+        }
+    }
+    for ($m = $matches.Count - 1; $m -ge 0; $m--) {
+        $extra = $extra.Remove($matches[$m].Index, $matches[$m].Length)
+    }
+    return @{
+        Options = ($options -join [Environment]::NewLine)
+        Packages = ($packages -join [Environment]::NewLine)
+        Definitions = $extra.Trim()
+    }
+}
 # Read the author argument with balanced braces (superscripts contain braces).
 $metadataSource = [regex]::Replace($source, '(?m)(?<!\\)%.*$', '')
 if (-not $Title) { $Title = Get-LatexArgument $metadataSource 'title' }
@@ -109,6 +177,7 @@ $preamble = @'
 % Separate reading copy; manuscript wording retained from main.tex.
 % Nature Communications-inspired layout, not an official journal template.
 \documentclass[9pt,twocolumn]{extarticle}
+@@SOURCE_PACKAGE_OPTIONS@@
 \usepackage[T1]{fontenc}
 \usepackage[utf8]{inputenc}
 \usepackage[paperwidth=210mm,paperheight=279mm,left=14mm,right=14mm,top=17mm,bottom=18mm,columnsep=4mm]{geometry}
@@ -128,7 +197,11 @@ $preamble = @'
 \usepackage{caption}
 \usepackage{fancyhdr}
 \usepackage{stfloats}
+% Additional packages retained from main.tex.
+@@SOURCE_PACKAGES@@
 \usepackage{hyperref}
+% Custom commands and definitions retained from main.tex.
+@@SOURCE_DEFINITIONS@@
 \hypersetup{colorlinks=true,citecolor=blue,linkcolor=blue,urlcolor=blue}
 \setcounter{secnumdepth}{0}
 \titleformat{\section}{\rmfamily\fontsize{10.5}{12}\selectfont\bfseries}{\thesection}{0pt}{}
@@ -193,6 +266,10 @@ $preamble = @'
 {\sffamily\fontsize{7.5}{9}\selectfont\raggedright\manuscriptAffiliations\par}
 \end{figure*}
 '@
+$sourcePreamble = Get-SourcePreamble $metadataSource $preamble
+$preamble = $preamble.Replace('@@SOURCE_PACKAGE_OPTIONS@@', $sourcePreamble.Options)
+$preamble = $preamble.Replace('@@SOURCE_PACKAGES@@', $sourcePreamble.Packages)
+$preamble = $preamble.Replace('@@SOURCE_DEFINITIONS@@', $sourcePreamble.Definitions)
 $preamble = $preamble.Replace('@@AUTHORS@@', $authors).Replace('@@AFFILIATIONS@@', $affiliations)
 $preamble = $preamble.Replace('@@TITLE@@', $Title).Replace('@@ABSTRACT@@', $abstract)
 $configLabels = @{

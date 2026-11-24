@@ -129,7 +129,8 @@ Your methods.
 
 - Keep all author names before the first LaTeX line break (`\\`), followed by affiliations. Separate `\and` author blocks are not supported.
 - Keep the exact `\section{Introduction}` marker. It locates the manuscript body; its printed heading is suppressed in the reading copy.
-- The source preamble is **replaced, not merged**. Add required custom packages or commands to the generator's `$preamble` block.
+- Additional source packages and custom definitions are retained automatically. Comma-separated package lists, package options and nested braces in metadata are supported. Packages already loaded by the template are not loaded twice.
+- The template still controls its document class, fonts, layout and citation style. Source declarations of these managed packages do not replace the template settings; ignored options or alternative managed packages produce a warning.
 - Edit `main.tex`, not the generated document. Regenerating overwrites the selected output. The script refuses to overwrite the root `main.tex`.
 
 ## Configuration
@@ -170,6 +171,7 @@ Title, authors, affiliations, abstract and paper content remain in `main.tex`.
 ## Limitations
 
 - **Not a general LaTeX converter.** Text matching assumes the input structure above. Complex macros and alternative document structures may require manual changes.
+- **Preamble merging has limits.** Ordinary `\usepackage` / `\RequirePackage` declarations and custom definitions are retained, but conditional or dynamically generated package declarations are not supported. Additional packages load before `hyperref`; packages requiring a different order need manual adjustment. Custom commands can still conflict with template definitions or change layout. `biblatex` is rejected because the template uses `natbib`.
 - **Format-sensitive float conversion.** Use `\begin{figure}[htbp]` and `\begin{table}[htbp]`. The current conversion is not safe for arbitrary placement options; inspect the generated environments if your source uses other forms.
 - **Dependencies are not bundled.** Figures, included files, bibliography databases and custom styles are not copied to `output/`. Compile from the project root and share the complete project when needed.
 - **Approximate typography and layout.** Fonts are substitutes, not the journal's proprietary typefaces. Long titles, abstracts and author lists affect pagination. The affiliation float is not guaranteed to remain on page one.
@@ -183,11 +185,21 @@ Title, authors, affiliations, abstract and paper content remain in `main.tex`.
 | Introduction marker not found | Use the exact `\section{Introduction}` command. |
 | Missing author block or unbalanced braces | Check `\author{...}` and the supported affiliation format. |
 | Configuration error | Check JSON syntax, setting names and string values. |
-| Missing package or undefined command during PDF compilation | Install the package or add custom definitions to `$preamble`; neither is needed merely to run the generator. |
+| Missing package or undefined command during PDF compilation | Check that the package is installed and declared, or that the command is defined, in the source preamble. Check the merge limitations above. A local LaTeX installation is not needed merely to generate `.tex`. |
 | Missing image or bibliography | Compile from the project root and verify referenced paths. |
 | Changes disappear after regeneration | Edit the source, configuration or generator, not the generated `.tex`. |
 
 ## Reporting issues
+
+### Run the preamble regression test
+
+With PowerShell and a local `pdflatex` installation, run:
+
+```powershell
+.\tests\Test-Preamble.ps1
+```
+
+The test checks retained table packages, package options, duplicate imports, nested metadata and custom commands, then compiles a small fixture. Test artifacts are kept under ignored `output/preamble-test-*/` folders. The test requires LaTeX; normal `.tex` generation does not.
 
 Include a minimal non-confidential manuscript, relevant configuration, PowerShell version and the error message or screenshot. For PDF compilation problems, also include the LaTeX version and relevant log output. Do not upload unpublished research or third-party artwork without permission.
 
